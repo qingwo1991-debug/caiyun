@@ -166,7 +166,7 @@
         v-else
         type="warning"
         :closable="false"
-        title="暂无可用云盘账号，请先到账号管理页面添加账号。"
+        title="暂无可用抢兑账号，请先在兑换中心「抢兑规则」页添加抢兑账号。"
       />
 
       <el-form-item
