@@ -29,9 +29,39 @@ type Logger struct {
 	level  LogLevel
 	output io.Writer
 	mu     sync.RWMutex
+	hook   LogHook
 
 	errorCount int
 	lastError  string
+}
+
+// LogHook 每写入一行控制台日志时回调：level 为小写级别名，message 为去除
+// ANSI 颜色码的纯文本。用于把任务执行日志实时推送到 Web 端（SSE/WS）。
+type LogHook func(level string, message string)
+
+// SetHook 设置日志回调；传 nil 可移除。仅当日志真正输出（级别未被过滤）时触发。
+func (l *Logger) SetHook(hook LogHook) {
+	l.mu.Lock()
+	l.hook = hook
+	l.mu.Unlock()
+}
+
+// logLevelName 返回级别的小写名称，作为推送给前端的事件字段。
+func logLevelName(level LogLevel) string {
+	switch level {
+	case LevelDebug:
+		return "debug"
+	case LevelSuccess:
+		return "success"
+	case LevelWarn:
+		return "warn"
+	case LevelError, LevelFatal:
+		return "error"
+	case LevelTrace:
+		return "trace"
+	default:
+		return "info"
+	}
 }
 
 // NewLogger 创建日志记录器
@@ -45,9 +75,17 @@ func NewLogger(level LogLevel) *Logger {
 // log 内部日志方法
 func (l *Logger) log(level LogLevel, color string, args ...interface{}) {
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	message := fmt.Sprintf("%s [%s] %s", color, timestamp, formatArgs(args...))
+	plain := formatArgs(args...)
+	message := fmt.Sprintf("%s [%s] %s", color, timestamp, plain)
 
 	fmt.Fprintln(l.output, message)
+
+	l.mu.RLock()
+	hook := l.hook
+	l.mu.RUnlock()
+	if hook != nil {
+		hook(logLevelName(level), plain)
+	}
 }
 
 // formatArgs 格式化参数

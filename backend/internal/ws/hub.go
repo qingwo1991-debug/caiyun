@@ -422,6 +422,26 @@ func (h *Hub) SendToUser(userID uint, msg Message) {
 	}
 }
 
+// PublishLive 发送瞬态消息：不写入离线补偿仓库、不分配持久序号，
+// 仅本地扇出并跨节点广播。适用于任务控制台日志等高频实时流，
+// 避免每一行日志都落库并推进客户端重放游标。
+func (h *Hub) PublishLive(userID uint, msg Message) {
+	if !h.beginOperation() {
+		return
+	}
+	defer h.operationWG.Done()
+	msg = h.prepareMessage(userID, msg)
+	h.mu.RLock()
+	bus := h.eventBus
+	h.mu.RUnlock()
+	h.deliverNewEnvelope(msg)
+	if bus != nil {
+		if err := bus.publish(msg); err != nil {
+			log.Printf("[WS] 实时事件跨节点发布失败 type=%s: %v", msg.Type, err)
+		}
+	}
+}
+
 func (h *Hub) Broadcast(msg Message) {
 	if !h.beginOperation() {
 		return

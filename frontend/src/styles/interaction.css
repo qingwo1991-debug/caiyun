@@ -24,6 +24,10 @@ body.caiyun-workspace {
   outline: 3px solid #2563eb;
   outline-offset: 3px;
 }
+/* 文本输入类控件不使用粗描边：点击/聚焦只保留主色 1px 内边框，避免突兀的蓝色方框。 */
+.caiyun-workspace :is(.el-input__wrapper, .el-select__wrapper, .el-textarea, .el-textarea__inner, .el-input__inner, .el-select__input):focus-visible {
+  outline: none !important;
+}
 .caiyun-workspace .el-button {
   transition: background-color var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast),
     transform var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast);
@@ -33,7 +37,7 @@ body.caiyun-workspace {
   transition: box-shadow var(--motion-fast), background-color var(--motion-fast);
 }
 .caiyun-workspace :is(.el-input__wrapper.is-focus, .el-select__wrapper.is-focused) {
-  box-shadow: 0 0 0 1px #2563eb inset, 0 0 0 3px #2563eb14 !important;
+  box-shadow: 0 0 0 1px #2563eb inset !important;
 }
 .caiyun-workspace .el-switch:has(input:focus-visible) .el-switch__core {
   outline: 3px solid #2563eb; outline-offset: 3px;

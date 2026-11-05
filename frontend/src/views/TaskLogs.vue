@@ -240,6 +240,63 @@
       />
     </el-card>
 
+    <!-- 实时日志（任务执行时逐行滚动，不落库，刷新后清空） -->
+    <el-card
+      shadow="hover"
+      class="live-log-card"
+    >
+      <template #header>
+        <div class="card-header live-log-header">
+          <span class="live-title">
+            <span
+              class="live-dot"
+              :class="{ on: liveConnected }"
+            />实时日志
+          </span>
+          <div class="live-actions">
+            <el-checkbox
+              v-model="liveAutoScroll"
+              label="自动滚动"
+              size="small"
+            />
+            <el-button
+              size="small"
+              @click="clearLiveLines"
+            >
+              清空
+            </el-button>
+          </div>
+        </div>
+      </template>
+      <div
+        ref="liveListRef"
+        class="live-log-list"
+      >
+        <div
+          v-if="liveLines.length === 0"
+          class="live-log-empty"
+        >
+          {{ liveConnected ? '暂无实时日志，任务执行时将在此滚动显示' : '实时连接未建立，连接恢复后自动接收' }}
+        </div>
+        <div
+          v-for="line in liveLines"
+          :key="line.id"
+          class="live-log-line"
+        >
+          <span class="live-time">{{ line.at }}</span>
+          <span
+            v-if="line.phone"
+            class="live-account"
+          >{{ maskPhone(line.phone) }}</span>
+          <span
+            class="live-level"
+            :class="getLiveLevel(line).cls"
+          >{{ getLiveLevel(line).label }}</span>
+          <span class="live-message">{{ line.message }}</span>
+        </div>
+      </div>
+    </el-card>
+
     <!-- 详情对话框 -->
     <el-dialog
       v-model="detailVisible"
@@ -341,11 +398,12 @@
 <script setup lang="ts">
 import { useLatestRequest } from '@/composables/useLatestRequest'
 import { useDeferredLoading } from '@/composables/useDeferredLoading'
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getTaskLogs, type TaskLog } from '../api/task'
 import { getTaskTypeName, taskTypeOptions } from '../utils/task-types'
 import { formatExchangeResult } from '@/utils/exchange-result'
+import { wsClient, type WsMessage } from '@/api/websocket'
 
 const { loading, execute: latestLogRequest } = useLatestRequest()
 const showLoading = useDeferredLoading(loading)
@@ -693,14 +751,74 @@ const formatLogMessageForDetail = (log?: Partial<TaskLog>) => {
   return maskPhoneNumbers(formatLogMessage(log, true))
 }
 
+// ===== 实时日志（SSE/WS type=task.log，任务执行时逐行推送）=====
+interface LiveLogLine {
+  id: number
+  accountId: number
+  phone: string
+  level: string
+  message: string
+  at: string
+}
+
+const liveLines = ref<LiveLogLine[]>([])
+const liveConnected = wsClient.connected
+const liveAutoScroll = ref(true)
+const liveListRef = ref<HTMLElement | null>(null)
+const liveMaxLines = 500
+let liveSeq = 0
+
+const liveLevelMeta: Record<string, { label: string; cls: string }> = {
+  success: { label: '成功', cls: 'live-success' },
+  error: { label: '错误', cls: 'live-error' },
+  warn: { label: '警告', cls: 'live-warn' },
+  info: { label: '信息', cls: 'live-info' },
+  debug: { label: '调试', cls: 'live-debug' },
+  trace: { label: '跟踪', cls: 'live-debug' }
+}
+
+const handleTaskLogEvent = (msg: WsMessage) => {
+  const data = msg.data && typeof msg.data === 'object'
+    ? (msg.data as Record<string, unknown>)
+    : {}
+  const message = typeof data.message === 'string' ? data.message : ''
+  if (!message) return
+  liveSeq += 1
+  liveLines.value.push({
+    id: liveSeq,
+    accountId: typeof data.account_id === 'number' ? data.account_id : 0,
+    phone: typeof data.phone === 'string' ? data.phone : '',
+    level: typeof data.level === 'string' ? data.level : 'info',
+    message,
+    at: new Date().toLocaleTimeString('zh-CN', { hour12: false })
+  })
+  if (liveLines.value.length > liveMaxLines) {
+    liveLines.value.splice(0, liveLines.value.length - liveMaxLines)
+  }
+}
+
+const clearLiveLines = () => {
+  liveLines.value = []
+}
+
+const getLiveLevel = (line: LiveLogLine) => liveLevelMeta[line.level] || liveLevelMeta.info
+
+watch(() => liveLines.value.length, async () => {
+  if (!liveAutoScroll.value || !liveListRef.value) return
+  await nextTick()
+  liveListRef.value.scrollTop = liveListRef.value.scrollHeight
+})
+
 onMounted(() => {
   syncViewport()
   window.addEventListener('resize', syncViewport)
+  wsClient.on('task.log', handleTaskLogEvent)
   loadLogs()
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', syncViewport)
+  wsClient.off('task.log', handleTaskLogEvent)
 })
 </script>
 
@@ -815,5 +933,34 @@ onUnmounted(() => {
 }
 @media (max-width: 480px) {
   .execution-result-header { align-items: stretch; flex-direction: column; }
+}
+
+/* ===== 实时日志 ===== */
+.live-log-card { margin-top: 16px; }
+.live-log-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.live-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; flex-shrink: 0; }
+.live-dot.on { background: #22c55e; box-shadow: 0 0 0 3px #22c55e33; }
+.live-actions { display: inline-flex; align-items: center; gap: 10px; }
+.live-log-list {
+  max-height: 320px; overflow-y: auto; overscroll-behavior: contain;
+  font-family: 'JetBrains Mono', Consolas, Menlo, monospace;
+  font-size: 12.5px; line-height: 1.75;
+  background: #0f172a; color: #e2e8f0;
+  border-radius: 8px; padding: 10px 12px;
+}
+.live-log-line { display: flex; gap: 8px; align-items: baseline; word-break: break-all; }
+.live-time { color: #64748b; flex-shrink: 0; }
+.live-account { color: #7dd3fc; flex-shrink: 0; }
+.live-level { flex-shrink: 0; padding: 0 6px; border-radius: 4px; font-size: 11px; background: #1e293b; }
+.live-info { color: #93c5fd; }
+.live-success { color: #86efac; }
+.live-warn { color: #fde68a; }
+.live-error { color: #fca5a5; }
+.live-debug { color: #94a3b8; }
+.live-message { white-space: pre-wrap; min-width: 0; }
+.live-log-empty { color: #94a3b8; text-align: center; padding: 28px 0; font-size: 13px; font-family: inherit; }
+@media (max-width: 768px) {
+  .live-log-list { max-height: 240px; font-size: 12px; }
 }
 </style>

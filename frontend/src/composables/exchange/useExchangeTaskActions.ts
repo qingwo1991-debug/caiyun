@@ -121,7 +121,11 @@ export function useExchangeTaskActions(options: UseExchangeTaskActionsOptions) {
     }
 
     if (!applyDefaultTaskAccount()) {
-      ElMessage.warning('暂无可用云盘账号，请先到账号页面添加并启用账号')
+      ElMessage.warning(
+        options.isAdmin.value
+          ? '暂无可用抢兑账号，请先在兑换中心「账号管理」绑定抢兑账号'
+          : '暂无可用云盘账号，请先到账号页面添加并启用账号'
+      )
       return false
     }
 

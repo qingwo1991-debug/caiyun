@@ -116,6 +116,25 @@ type taskRunnerOptions struct {
 func buildTaskRunner(svc *TaskService, account *models.Account, storage tasks.Storage, authMgr *auth.Auth, disabledTasks map[string]bool, opts taskRunnerOptions) *TaskRunner {
 	client := http.NewClient()
 	lg := logger.NewLogger(logger.LevelInfo)
+
+	// 任务控制台日志实时推送：每行日志经 Hub.PublishLive 广播给在线客户端
+	// （SSE/WS，type=task.log）。瞬态消息不落库、不参与离线重放。
+	if svc != nil && svc.eventHub != nil && account != nil {
+		hub := svc.eventHub
+		userID, accountID, phone := account.UserID, account.ID, account.Phone
+		lg.SetHook(func(level, message string) {
+			hub.PublishLive(userID, ws.Message{
+				Type: "task.log",
+				Data: map[string]interface{}{
+					"account_id": accountID,
+					"phone":      phone,
+					"level":      level,
+					"message":    message,
+				},
+			})
+		})
+	}
+
 	runner := newTaskRunner(account, client, lg, storage, authMgr, disabledTasks)
 	if opts.maxJWTRetries <= 0 {
 		opts.maxJWTRetries = 1
